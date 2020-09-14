@@ -262,33 +262,7 @@ class Apn extends PushService implements PushServiceInterface
 
             // https://stackoverflow.com/a/32978293
             if ($useProxy) {
-                $apnUrl = parse_url($this->url);
-
-                // destination host and port must be accepted by proxy
-                $connectViaProxy = "CONNECT " . $apnUrl["host"] . ":" . $apnUrl["port"] . " HTTP/1.1\r\n".
-                    "Host: " . $apnUrl["host"] . ":" . $apnUrl["port"] . "\n" .
-                    "User-Agent: GTOPush\n" .
-                    "Proxy-Connection: Keep-Alive\n\n";
-
-                fwrite($fp, $connectViaProxy, strlen($connectViaProxy));
-
-                // read whole response and check successful "HTTP/1.0 200 Connection established"
-                if ($response = fread($fp,1024)) {
-                    $parts = explode(' ', $response);
-                    if ($parts[1] !== '200') {
-                        $responseFeedback = ['success' => false, 'error' => 'Connection error: ' . trim($response) . PHP_EOL];
-                        $this->setFeedback(json_decode(json_encode($responseFeedback)));
-                    }
-                } else {
-                    $responseFeedback = ['success' => false, 'error' => 'Timeout or other error' . PHP_EOL];
-                    $this->setFeedback(json_decode(json_encode($responseFeedback)));
-                }
-
-                // switch to SSL encrypted communication using local certificate from $context_options
-                if (!stream_socket_enable_crypto($fp,true,STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
-                    $responseFeedback = ['success' => false, 'error' => 'Switch to SSL error' . PHP_EOL];
-                    $this->setFeedback(json_decode(json_encode($responseFeedback)));
-                }
+                $this->useProxy($fp, $this->url);
             }
 
             if (!$fp) {
@@ -414,7 +388,14 @@ class Apn extends PushService implements PushServiceInterface
 
         // Open a connection to the APNS server
         try {
-            $apns = stream_socket_client($this->feedbackUrl, $errcode, $errstr, 60, STREAM_CLIENT_CONNECT, $ctx);
+            $useProxy = isset($this->config['proxy']);
+            $socketUrl = $useProxy ? $this->config['proxy'] : $this->feedbackUrl;
+            $apns = stream_socket_client($socketUrl, $errcode, $errstr, 60, STREAM_CLIENT_CONNECT, $ctx);
+
+            // https://stackoverflow.com/a/32978293
+            if ($useProxy) {
+                $this->useProxy($apns, $this->feedbackUrl);
+            }
 
             //Read the data on the connection:
             while (!feof($apns)) {
@@ -471,6 +452,42 @@ class Apn extends PushService implements PushServiceInterface
         }
 
         return $feedback;
+    }
+
+    /**
+     * @param $fp
+     * @param $url
+     * @return void
+     */
+    private function useProxy($fp, $url)
+    {
+        $apnUrl = parse_url($url);
+
+        // destination host and port must be accepted by proxy
+        $connectViaProxy = "CONNECT " . $apnUrl["host"] . ":" . $apnUrl["port"] . " HTTP/1.1\r\n" .
+            "Host: " . $apnUrl["host"] . ":" . $apnUrl["port"] . "\n" .
+            "User-Agent: GTOPush\n" .
+            "Proxy-Connection: Keep-Alive\n\n";
+
+        fwrite($fp, $connectViaProxy, strlen($connectViaProxy));
+
+        // read whole response and check successful "HTTP/1.0 200 Connection established"
+        if ($response = fread($fp, 1024)) {
+            $parts = explode(' ', $response);
+            if ($parts[1] !== '200') {
+                $responseFeedback = ['success' => false, 'error' => 'Connection error: ' . trim($response) . PHP_EOL];
+                $this->setFeedback(json_decode(json_encode($responseFeedback)));
+            }
+        } else {
+            $responseFeedback = ['success' => false, 'error' => 'Timeout or other error' . PHP_EOL];
+            $this->setFeedback(json_decode(json_encode($responseFeedback)));
+        }
+
+        // switch to SSL encrypted communication using local certificate from $context_options
+        if (!stream_socket_enable_crypto($fp, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
+            $responseFeedback = ['success' => false, 'error' => 'Switch to SSL error' . PHP_EOL];
+            $this->setFeedback(json_decode(json_encode($responseFeedback)));
+        }
     }
 
 }
