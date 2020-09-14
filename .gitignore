@@ -5,7 +5,6 @@
 Thumbs.db
 # Composer
 vendor/
-composer.lock
 # local files
 src/Config/iosCertificates/
 # phpunit
