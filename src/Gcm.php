@@ -31,7 +31,7 @@ class Gcm extends PushService implements PushServiceInterface
         $this->url = 'https://android.googleapis.com/gcm/send';
         
         $this->config = $this->initializeConfig('gcm');
-        $this->client = new Client;
+        $this->client = new Client($this->config['client']);
     }
 
     /**
