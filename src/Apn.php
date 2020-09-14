@@ -246,8 +246,11 @@ class Apn extends PushService implements PushServiceInterface
 
         // Open a connection to the APNS server
         try {
+            $useProxy = isset($this->config['proxy']);
+            $socketUrl = $useProxy ? $this->config['proxy'] : $this->url;
+
             $fp = stream_socket_client(
-                $this->url,
+                $socketUrl,
                 $err,
                 $errstr,
                 60,
@@ -256,6 +259,37 @@ class Apn extends PushService implements PushServiceInterface
             );
 
             stream_set_blocking($fp, 0);
+
+            // https://stackoverflow.com/a/32978293
+            if ($useProxy) {
+                $apnUrl = parse_url($this->url);
+
+                // destination host and port must be accepted by proxy
+                $connectViaProxy = "CONNECT " . $apnUrl["host"] . ":" . $apnUrl["port"] . " HTTP/1.1\r\n".
+                    "Host: " . $apnUrl["host"] . ":" . $apnUrl["port"] . "\n" .
+                    "User-Agent: GTOPush\n" .
+                    "Proxy-Connection: Keep-Alive\n\n";
+
+                fwrite($fp, $connectViaProxy, strlen($connectViaProxy));
+
+                // read whole response and check successful "HTTP/1.0 200 Connection established"
+                if ($response = fread($fp,1024)) {
+                    $parts = explode(' ', $response);
+                    if ($parts[1] !== '200') {
+                        $responseFeedback = ['success' => false, 'error' => 'Connection error: ' . trim($response) . PHP_EOL];
+                        $this->setFeedback(json_decode(json_encode($responseFeedback)));
+                    }
+                } else {
+                    $responseFeedback = ['success' => false, 'error' => 'Timeout or other error' . PHP_EOL];
+                    $this->setFeedback(json_decode(json_encode($responseFeedback)));
+                }
+
+                // switch to SSL encrypted communication using local certificate from $context_options
+                if (!stream_socket_enable_crypto($fp,true,STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
+                    $responseFeedback = ['success' => false, 'error' => 'Switch to SSL error' . PHP_EOL];
+                    $this->setFeedback(json_decode(json_encode($responseFeedback)));
+                }
+            }
 
             if (!$fp) {
                 $response = ['success' => false, 'error' => "Failed to connect: $err $errstr" . PHP_EOL];
